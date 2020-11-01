@@ -1,4 +1,4 @@
-# garmin-influxdb
+# Python Garmin Connect data converter to InfluxDB
 
 This script stands on the giants of the [GarminConnect PyPi](https://pypi.org/project/garminconnect/) as well as the [InfluxDB PyPi](https://influxdb-python.readthedocs.io/en/latest/include-readme.html). 
 
