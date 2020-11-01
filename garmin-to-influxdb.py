@@ -172,6 +172,8 @@ def create_influxdb_daily_measurement(user_data, influxdb_client):
                   "for this day is required")
             pass
         else:
+            if "minutes" in heading.lower():
+                value = value / 60
             print(user_data['current_date'])
             json_body = create_json_body(heading, value, user_data['current_date'])
             influxdb_client.write_points(json_body)
@@ -214,12 +216,13 @@ def create_influxdb_multi_measurement(user_data, subset_list_of_stats, start_tim
                       "for this day is required")
                 pass
             else:
+                if "speed" in inner_heading.lower():
+                    value = value * speed_multiplier
                 json_body = create_json_body(inner_heading, value, heading)
                 print(current_date)
                 print("Adding: %s\nValue: %s" % (inner_heading, value))
                 influxdb_client.write_points(json_body)
     print("")
-
 
 client = connect_to_garmin(username=garmin_username,password=garmin_password)
 
@@ -252,10 +255,10 @@ for x in range(time_delta.days +1):
     sleep_data_date = time.mktime(time.strptime(sleep_data['dailySleepDTO']['calendarDate'], garmin_date_format))
     daily_stats_date = time.mktime(time.strptime(stats['calendarDate'], garmin_date_format))
     useful_daily_sleep_data = {
-        'awake_seconds': sleep_data['dailySleepDTO']['awakeSleepSeconds'],
-        'light_sleep_seconds': sleep_data['dailySleepDTO']['lightSleepSeconds'],
-        'deep_sleep_seconds': sleep_data['dailySleepDTO']['deepSleepSeconds'],
-        'total_sleep_seconds': sleep_data['dailySleepDTO']['sleepTimeSeconds'],
+        'awake_minutes': sleep_data['dailySleepDTO']['awakeSleepSeconds'],
+        'light_sleep_minutes': sleep_data['dailySleepDTO']['lightSleepSeconds'],
+        'deep_sleep_minutes': sleep_data['dailySleepDTO']['deepSleepSeconds'],
+        'total_sleep_minutes': sleep_data['dailySleepDTO']['sleepTimeSeconds'],
         'current_date': time.strftime(influxdb_time_format, time.localtime(sleep_data_date))
                               }
     heart_rate = {
@@ -269,9 +272,9 @@ for x in range(time_delta.days +1):
         "current_date": time.strftime(influxdb_time_format, time.localtime(daily_stats_date)),
         "total_steps": stats['totalSteps'],
         "daily_step_goal": stats['dailyStepGoal'],
-        "highly_active_seconds": stats['highlyActiveSeconds'],
-        "moderately_active_seconds": stats['activeSeconds'],
-        "sedentary_seconds": stats['sedentarySeconds']
+        "highly_active_minutes": stats['highlyActiveSeconds'],
+        "moderately_active_minutes": stats['activeSeconds'],
+        "sedentary_minutes": stats['sedentarySeconds']
     }
     create_influxdb_daily_measurement(daily_stats, influxdb_client)
     create_influxdb_daily_measurement(useful_daily_sleep_data, influxdb_client)
