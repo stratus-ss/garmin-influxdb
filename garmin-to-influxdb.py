@@ -224,13 +224,14 @@ def create_influxdb_multi_measurement(user_data, subset_list_of_stats, start_tim
                 influxdb_client.write_points(json_body)
     print("")
 
+
 client = connect_to_garmin(username=garmin_username,password=garmin_password)
 
 # unless you want to graph the hourly heart rate times heart_rate is useless as you can get this info
 # from the daily stats
 # heart_rate = get_data_from_garmin("heart_rate", "client.get_heart_rates(today.isoformat())", client=client)
 
-activities = get_data_from_garmin("activities", "client.get_activities(0, 2)", client=client)  # 0=start, 1=limit
+activities = get_data_from_garmin("activities", "client.get_activities(0, 10)", client=client)  # 0=start, 1=limit
 activity_list = ['distance', 'duration', 'averageSpeed', 'maxSpeed', 'averageHR', 'maxHR',
                 'averageRunningCadenceInStepsPerMinute', 'steps', 'avgStrideLength']
 # there is very little data in the step_data so it's not worth re-skinning
@@ -251,9 +252,16 @@ for x in range(time_delta.days +1):
     step_data = get_data_from_garmin("step_data", client_get_data, client=client)
 
     stats = get_data_from_garmin("stats", client_get_stats, client=client)
-    sleep_data = get_data_from_garmin("sleep_data", client_get_sleep , client=client)
+    sleep_data = get_data_from_garmin("sleep_data", client_get_sleep, client=client)
     sleep_data_date = time.mktime(time.strptime(sleep_data['dailySleepDTO']['calendarDate'], garmin_date_format))
-    daily_stats_date = time.mktime(time.strptime(stats['calendarDate'], garmin_date_format))
+    # Adding 20000 seconds to the date to account for the GMT offset. Without this, activities were showing up
+    # on previous day in InfluxDB
+    daily_stats_date = time.mktime(time.strptime(stats['calendarDate'], garmin_date_format)) + 20000
+    floor_data = {
+        'floors_ascended': stats['floorsAscended'],
+        'floors_descended':  stats['floorsDescended'],
+        "current_date": time.strftime(influxdb_time_format, time.localtime(daily_stats_date))
+    }
     useful_daily_sleep_data = {
         'awake_minutes': sleep_data['dailySleepDTO']['awakeSleepSeconds'],
         'light_sleep_minutes': sleep_data['dailySleepDTO']['lightSleepSeconds'],
@@ -279,7 +287,7 @@ for x in range(time_delta.days +1):
     create_influxdb_daily_measurement(daily_stats, influxdb_client)
     create_influxdb_daily_measurement(useful_daily_sleep_data, influxdb_client)
     create_influxdb_daily_measurement(heart_rate, influxdb_client)
-
+    create_influxdb_daily_measurement(floor_data, influxdb_client)
     step_list = ['steps']
 
     create_influxdb_multi_measurement(step_data, step_list, 'startGMT', "%Y-%m-%dT%H:%M:%S.%f",
