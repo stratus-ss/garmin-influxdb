@@ -16,8 +16,8 @@ from influxdb import InfluxDBClient
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
-start_date = date(2018,4,1)
-end_date = date(2020,11,1)
+start_date = date(2023,9,1)
+end_date = date(2023,9,17)
 
 today = date.today()
 # The speed multiplier was found by taking the "averageSpeed" float from an activity and comparing
@@ -31,7 +31,7 @@ influx_server = "192.168.99.60"
 influx_port = 8086
 influx_username = ""
 influx_password = ""
-influx_db = "garmin"
+influx_db = ""
 influxdb_time_format = "%Y-%m-%dT%H:%M:%SZ"
 
 
@@ -241,14 +241,9 @@ create_influxdb_multi_measurement(activities, activity_list, 'startTimeLocal', '
                                  timestamp_offset=True)
 for x in range(time_delta.days +1):
     day = str(start_date + timedelta(days=x))
-    date_without_leading_zero = []
-    for digit in day.split("-"):
-        new_digit = digit.lstrip("0")
-        date_without_leading_zero.append(new_digit)
-    date_without_leading_zero = "-".join(date_without_leading_zero)
-    client_get_data = 'client.get_steps_data("%s")' % date_without_leading_zero
-    client_get_sleep = 'client.get_sleep_data("%s")' % date_without_leading_zero
-    client_get_stats = 'client.get_stats("%s")' % date_without_leading_zero
+    client_get_data = 'client.get_steps_data("%s")' % day
+    client_get_sleep = 'client.get_sleep_data("%s")' % day
+    client_get_stats = 'client.get_stats("%s")' % day
     step_data = get_data_from_garmin("step_data", client_get_data, client=client)
 
     stats = get_data_from_garmin("stats", client_get_stats, client=client)
