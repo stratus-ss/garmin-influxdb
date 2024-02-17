@@ -12,7 +12,8 @@ influx_server =
 influx_port = 
 influx_username = 
 influx_password = 
-influx_db = 
+influx_db =
+gather_hrv_data = False
 ```
 
 You should not edit the date or time format variables in the script unless something stops working. Garmin provides at least 3 different date/time stamps in their data and this needs to be converted to the InfluxDB expected format.
