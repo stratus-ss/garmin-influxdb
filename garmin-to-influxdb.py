@@ -287,7 +287,8 @@ for x in range(time_delta.days +1):
         hrv_daily_summary = {
             "hrv_last_night_avg": hrv_data['hrvSummary']['lastNightAvg'],
             "hrv_weekly_avg": hrv_data['hrvSummary']['weeklyAvg'],
-            "hrv_status": hrv_data['hrvSummary']['status']
+            "hrv_status": hrv_data['hrvSummary']['status'],
+            "current_date": time.strftime(influxdb_time_format, time.localtime(daily_stats_date)) 
         }
         create_influxdb_daily_measurement(hrv_daily_summary, influxdb_client)
         
