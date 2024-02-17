@@ -27,13 +27,13 @@ garmin_username = ''
 garmin_password = ""
 
 garmin_date_format = "%Y-%m-%d"
-influx_server = "192.168.99.60"
+influx_server = "x.x.x.x"
 influx_port = 8086
 influx_username = ""
 influx_password = ""
 influx_db = ""
 influxdb_time_format = "%Y-%m-%dT%H:%M:%SZ"
-
+gather_hrv_data = False
 
 def get_data_from_garmin(component, command, client=None):
     """
@@ -53,11 +53,11 @@ def get_data_from_garmin(component, command, client=None):
         GarminConnectAuthenticationError,
         GarminConnectTooManyRequestsError,
     ) as err:
-        print("Error occurred during Garmin Connect Client get %s: %s" % (component, err))
+        print(f"Error occurred during Garmin Connect Client get {component}: {err}")
         quit()
     except Exception as e:  # pylint: disable=broad-except
         print(e)
-        print("Unknown error occurred during Garmin Connect Client get %s" % component)
+        print(f"Unknown error occurred during Garmin Connect Client get {component}")
         quit()
     return result
 
@@ -81,7 +81,7 @@ def connect_to_garmin(username, password):
             GarminConnectAuthenticationError,
             GarminConnectTooManyRequestsError,
     ) as err:
-        print("Error occurred during Garmin Connect Client get initial client: %s" % err)
+        print(f"Error occurred during Garmin Connect Client get initial client: {err}")
         quit()
     except Exception:
         print("Unknown error occurred during Garmin Connect Client get initial client")
@@ -127,14 +127,14 @@ def download_all_activity(client, activities):
         GarminConnectAuthenticationError,
         GarminConnectTooManyRequestsError,
     ) as err:
-        print("Error occurred during Garmin Connect Client get activity data: %s" % err)
+        print(f"Error occurred during Garmin Connect Client get activity data: {err}")
         quit()
     except Exception:  # pylint: disable=broad-except
         print("Unknown error occurred during Garmin Connect Client get activity data")
         quit()
 
 
-def create_json_body(measurement, measurement_value, datestamp, tags={}):
+def create_json_body(measurement, measurement_value, datestamp, tags=None):
     """
     This creates the json body that will be used to create measurements in InfluxDB
 
@@ -144,7 +144,7 @@ def create_json_body(measurement, measurement_value, datestamp, tags={}):
     :param tags: any tags to be assiated with the measurement. Expects a dict
     :return: json object
     """
-    json_body = [
+    return [
         {
             "measurement": measurement,
             "tags": tags,
@@ -154,7 +154,6 @@ def create_json_body(measurement, measurement_value, datestamp, tags={}):
             }
         }
     ]
-    return json_body
 
 
 def create_influxdb_daily_measurement(user_data, influxdb_client):
@@ -170,7 +169,6 @@ def create_influxdb_daily_measurement(user_data, influxdb_client):
         if value is None:
             print("Unknown whether value should be an INT or a FLOAT. Manually intervention "
                   "for this day is required")
-            pass
         else:
             if "minutes" in heading.lower():
                 value = value / 60
@@ -214,7 +212,6 @@ def create_influxdb_multi_measurement(user_data, subset_list_of_stats, start_tim
             if value is None:
                 print("Unknown whether value should be an INT or a FLOAT. Manually intervention "
                       "for this day is required")
-                pass
             else:
                 if "speed" in inner_heading.lower():
                     value = value * speed_multiplier
@@ -241,11 +238,12 @@ create_influxdb_multi_measurement(activities, activity_list, 'startTimeLocal', '
                                  timestamp_offset=True)
 for x in range(time_delta.days +1):
     day = str(start_date + timedelta(days=x))
-    client_get_data = 'client.get_steps_data("%s")' % day
-    client_get_sleep = 'client.get_sleep_data("%s")' % day
-    client_get_stats = 'client.get_stats("%s")' % day
+    client_get_data = f'client.get_steps_data("{day}")'
+    client_get_sleep = f'client.get_sleep_data("{day}")'
+    client_get_stats = f'client.get_stats("{day}")'
+    
     step_data = get_data_from_garmin("step_data", client_get_data, client=client)
-
+    
     stats = get_data_from_garmin("stats", client_get_stats, client=client)
     sleep_data = get_data_from_garmin("sleep_data", client_get_sleep, client=client)
     sleep_data_date = time.mktime(time.strptime(sleep_data['dailySleepDTO']['calendarDate'], garmin_date_format))
@@ -270,6 +268,7 @@ for x in range(time_delta.days +1):
         "resting_heart_rate": stats['restingHeartRate'],
         "current_date": time.strftime(influxdb_time_format, time.localtime(daily_stats_date))
     }
+    
     daily_stats = {
         "total_burned_calories": stats['totalKilocalories'],
         "current_date": time.strftime(influxdb_time_format, time.localtime(daily_stats_date)),
@@ -279,10 +278,24 @@ for x in range(time_delta.days +1):
         "moderately_active_minutes": stats['activeSeconds'],
         "sedentary_minutes": stats['sedentarySeconds']
     }
+    
+    if gather_hrv_data:
+        # Only gather this data if the user has set this to true
+        # This data isn't available on all devices so it will error if set to True by default
+        client_get_hrv = f'client.get_hrv_data("{day}")'
+        hrv_data = get_data_from_garmin("hrv_data", client_get_hrv, client=client)
+        hrv_daily_summary = {
+            "hrv_last_night_avg": hrv_data['hrvSummary']['lastNightAvg'],
+            "hrv_weekly_avg": hrv_data['hrvSummary']['weeklyAvg'],
+            "hrv_status": hrv_data['hrvSummary']['status']
+        }
+        create_influxdb_daily_measurement(hrv_daily_summary, influxdb_client)
+        
     create_influxdb_daily_measurement(daily_stats, influxdb_client)
     create_influxdb_daily_measurement(useful_daily_sleep_data, influxdb_client)
     create_influxdb_daily_measurement(heart_rate, influxdb_client)
     create_influxdb_daily_measurement(floor_data, influxdb_client)
+    
     step_list = ['steps']
 
     create_influxdb_multi_measurement(step_data, step_list, 'startGMT', "%Y-%m-%dT%H:%M:%S.%f",
