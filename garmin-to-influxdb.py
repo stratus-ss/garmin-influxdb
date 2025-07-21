@@ -13,12 +13,16 @@ from garminconnect import (
 from datetime import date, timedelta
 import time
 from influxdb import InfluxDBClient
+from garth.exc import GarthHTTPError
+import os
+import requests
+import logging
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
-start_date = date(2023,9,1)
-end_date = date(2023,9,17)
-
+start_date = date(2021, 5, 19)
+end_date = date(2021, 12, 30)
+tokenstore = ".garminconnect"
 today = date.today()
 # The speed multiplier was found by taking the "averageSpeed" float from an activity and comparing
 # to the speed reporting in the app. For example a speed of 1.61199998 * multiplyer = 5.77804 km/hr
@@ -154,6 +158,7 @@ def create_json_body(measurement, measurement_value, datestamp, tags=None):
             }
         }
     ]
+    return json_body
 
 
 def create_influxdb_daily_measurement(user_data, influxdb_client):
@@ -177,8 +182,13 @@ def create_influxdb_daily_measurement(user_data, influxdb_client):
             influxdb_client.write_points(json_body)
 
 
-def create_influxdb_multi_measurement(user_data, subset_list_of_stats, start_time_heading, date_format,
-                                      timestamp_offset=False):
+def create_influxdb_multi_measurement(
+    user_data,
+    subset_list_of_stats,
+    start_time_heading,
+    date_format,
+    timestamp_offset=False,
+):
     """
     This method is for handling objects that have potential for multiple readings per day
     Such as multiple activities
@@ -210,8 +220,11 @@ def create_influxdb_multi_measurement(user_data, subset_list_of_stats, start_tim
     for heading, inner_dict in temp_dict.items():
         for inner_heading, value in inner_dict.items():
             if value is None:
-                print("Unknown whether value should be an INT or a FLOAT. Manually intervention "
-                      "for this day is required")
+                print(
+                    "Unknown whether value should be an INT or a FLOAT. Manually intervention "
+                    "for this day is required"
+                )
+                pass
             else:
                 if "speed" in inner_heading.lower():
                     value = value * speed_multiplier
@@ -228,15 +241,33 @@ client = connect_to_garmin(username=garmin_username,password=garmin_password)
 # from the daily stats
 # heart_rate = get_data_from_garmin("heart_rate", "client.get_heart_rates(today.isoformat())", client=client)
 
-activities = get_data_from_garmin("activities", "client.get_activities(0, 10)", client=client)  # 0=start, 1=limit
-activity_list = ['distance', 'duration', 'averageSpeed', 'maxSpeed', 'averageHR', 'maxHR',
-                'averageRunningCadenceInStepsPerMinute', 'steps', 'avgStrideLength']
+activities = get_data_from_garmin(
+    "activities", "client.get_activities(0, 10)", client=client
+)  # 0=start, 1=limit
+activity_list = [
+    "distance",
+    "duration",
+    "averageSpeed",
+    "maxSpeed",
+    "averageHR",
+    "maxHR",
+    "averageRunningCadenceInStepsPerMinute",
+    "steps",
+    "avgStrideLength",
+]
 # there is very little data in the step_data so it's not worth re-skinning
 time_delta = end_date - start_date
-influxdb_client = InfluxDBClient(influx_server, influx_port, influx_username, influx_password, influx_db)
-create_influxdb_multi_measurement(activities, activity_list, 'startTimeLocal', '%Y-%m-%d %H:%M:%S',
-                                 timestamp_offset=True)
-for x in range(time_delta.days +1):
+influxdb_client = InfluxDBClient(
+    influx_server, influx_port, influx_username, influx_password, influx_db
+)
+create_influxdb_multi_measurement(
+    activities,
+    activity_list,
+    "startTimeLocal",
+    "%Y-%m-%d %H:%M:%S",
+    timestamp_offset=True,
+)
+for x in range(time_delta.days + 1):
     day = str(start_date + timedelta(days=x))
     client_get_data = f'client.get_steps_data("{day}")'
     client_get_sleep = f'client.get_sleep_data("{day}")'
@@ -270,13 +301,16 @@ for x in range(time_delta.days +1):
     }
     
     daily_stats = {
-        "total_burned_calories": stats['totalKilocalories'],
-        "current_date": time.strftime(influxdb_time_format, time.localtime(daily_stats_date)),
-        "total_steps": stats['totalSteps'],
-        "daily_step_goal": stats['dailyStepGoal'],
-        "highly_active_minutes": stats['highlyActiveSeconds'],
-        "moderately_active_minutes": stats['activeSeconds'],
-        "sedentary_minutes": stats['sedentarySeconds']
+        "total_burned_calories": stats["totalKilocalories"],
+        "current_date": time.strftime(
+            influxdb_time_format, time.localtime(daily_stats_date)
+        ),
+        "total_steps": stats["totalSteps"],
+        "total_distance_meters": stats["totalDistanceMeters"],
+        "daily_step_goal": stats["dailyStepGoal"],
+        "highly_active_minutes": stats["highlyActiveSeconds"],
+        "moderately_active_minutes": stats["activeSeconds"],
+        "sedentary_minutes": stats["sedentarySeconds"],
     }
     
     if gather_hrv_data:
@@ -299,8 +333,12 @@ for x in range(time_delta.days +1):
     
     step_list = ['steps']
 
-    create_influxdb_multi_measurement(step_data, step_list, 'startGMT', "%Y-%m-%dT%H:%M:%S.%f",
-                                      )
+    create_influxdb_multi_measurement(
+        step_data,
+        step_list,
+        "startGMT",
+        "%Y-%m-%dT%H:%M:%S.%f",
+    )
     print(day)
     time.sleep(2.5)
 
