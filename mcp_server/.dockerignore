@@ -1,0 +1,5 @@
+test_mcp_client.py
+__pycache__/
+*.pyc
+.env
+.garminconnect

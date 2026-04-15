@@ -1,0 +1,18 @@
+{
+    "servers": {
+      "garmin-fitness": {
+        "command": "docker",
+        "args": [
+          "exec",
+          "-i",
+          "garmin-influxdb-mcp",
+          "python",
+          "mcp_server/server.py"
+        ],
+        "env": {},
+        "enabled": true,
+        "request_timeout_secs": 1800,
+        "transport": "stdio"
+      }
+    }
+}

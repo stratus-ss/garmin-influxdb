@@ -1,0 +1,18 @@
+services:
+  garmin-influxdb-mcp:
+    build:
+      context: .
+      dockerfile: mcp_server/Dockerfile
+    image: quay.io/sovens/mcps/garmin-influxdb:0.3
+    container_name: garmin-influxdb-mcp
+    command: ["sleep", "infinity"]
+    environment:
+      - INFLUX_HOST=${INFLUX_HOST:-localhost}
+      - INFLUX_PORT=${INFLUX_PORT:-8086}
+      - INFLUX_USER=${INFLUX_USER:-}
+      - INFLUX_PASS=${INFLUX_PASS:-}
+      - INFLUX_DB=${INFLUX_DB:-garmin}
+      - GARMIN_USER=${GARMIN_USER:-}
+      - GARMIN_PASS=${GARMIN_PASS:-}
+    network_mode: host
+    restart: unless-stopped

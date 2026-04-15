@@ -1,0 +1,4 @@
+mcp>=1.27
+influxdb
+garminconnect
+garth
