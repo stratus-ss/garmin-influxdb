@@ -135,11 +135,11 @@ class InfluxClient:
         if group_by:
             ql = f"SELECT {aggregation}(value) AS result FROM \"{metric}\" WHERE {time_clause} GROUP BY time({group_by})"
             points = list(self._client.query(ql).get_points())
-            values = [float(p["result"]) for p in points if p.get("result") is not None]
+            values = [float(p["result"]) for p in points if isinstance(p.get("result"), (int, float))]
         else:
             ql = f"SELECT {aggregation}(value) AS result FROM \"{metric}\" WHERE {time_clause}"
             points = list(self._client.query(ql).get_points())
-            values = [float(p["result"]) for p in points if p.get("result") is not None]
+            values = [float(p["result"]) for p in points if isinstance(p.get("result"), (int, float))]
 
         if not values:
             return {"metric": metric, "aggregation": aggregation, "range": time_range, "result": None, "unit_hint": _METRIC_UNITS.get(metric, "unknown")}
@@ -150,12 +150,20 @@ class InfluxClient:
             scalar = values[0] if len(values) == 1 else values
             result = scalar
 
+        if isinstance(result, (int, float)):
+            display_val = float(result)
+        elif isinstance(result, list) and result:
+            first = result[0]
+            display_val = first.get("value") if isinstance(first, dict) else float(first)
+        else:
+            display_val = None
+
         return {
             "metric": metric,
             "aggregation": aggregation,
             "range": time_range,
             "result": result,
-            "display": _display(metric, float(result) if isinstance(result, float) else (result[0] if isinstance(result, list) else None)),
+            "display": _display(metric, display_val),
             "unit_hint": _METRIC_UNITS.get(metric, "unknown"),
         }
 

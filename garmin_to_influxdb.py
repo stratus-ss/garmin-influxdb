@@ -110,12 +110,16 @@ def connect_to_garmin(username, password):
         try:
             garmin = Garmin(garmin_username, garmin_password)
             garmin.login()
-            garmin.garth.dump(tokenstore)
+            # garminconnect ≥0.3.x renamed self.garth → self.client
+            _garth_obj = getattr(garmin, "client", None) or getattr(garmin, "garth", None)
+            if _garth_obj:
+                _garth_obj.dump(tokenstore)
 
         except (
             FileNotFoundError,
             GarthHTTPError,
             GarminConnectAuthenticationError,
+            GarminConnectConnectionError,
             requests.exceptions.HTTPError,
         ) as err:
             logger.error("Login failed: %s", err)
