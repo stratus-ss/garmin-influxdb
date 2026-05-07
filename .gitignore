@@ -1,0 +1,10 @@
+venv_garmin/
+venv_garmin*/.garminconnect
+.garminconnect
+.env
+*.egg-info/
+__pycache__/
+*.pyc
+mcp_server/test_mcp_client.py
+devlogs/
+zed_plans/

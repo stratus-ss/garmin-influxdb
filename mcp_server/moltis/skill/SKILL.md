@@ -7,6 +7,9 @@ allowed_tools:
   - mcp__garmin-fitness__query_activities
   - mcp__garmin-fitness__delete_data
   - mcp__garmin-fitness__sync_garmin
+  - mcp__garmin-fitness__add_shoe
+  - mcp__garmin-fitness__list_shoes
+  - mcp__garmin-fitness__query_shoe_distance
 ---
 
 # Garmin Fitness MCP
@@ -30,6 +33,15 @@ allowed_tools:
 
 ### "how far did I run this month?" / "total miles walked in March" / "total running time last week"
 → Use `query_fitness_data` with an Activity Field metric (`distance`, `duration`, `averageSpeed`, etc.) + `activity_type` filter + `aggregation="sum"`. Convert meters to miles (/ 1609.34) or seconds to hours (/ 3600) as needed.
+
+### "how many miles are on my Brooks?" / "how far on shoe X since I started using it?" / "is it time to replace my shoes?"
+→ `query_shoe_distance(shoe_name="...")`. Looks up the shoe's stored first-use date, sums total_distance_meters since then. Compare the result against `max_distance_meters` (if set) to determine replacement timing.
+
+### "register a new pair of shoes" / "I started using new shoes on date X" / "track my Brooks Ghost 15"
+→ `add_shoe(shoe_name="...", first_use_date="YYYY-MM-DD")`. Optionally set `brand`, `model`, and `max_distance_meters` (typical shoe life ~643,000m / 400 miles).
+
+### "what shoes do I have tracked?" / "list my running shoes"
+→ `list_shoes()` — no arguments. Returns all registered shoes with their first-use dates and mileage caps.
 
 ## Metric Catalog
 
@@ -180,6 +192,23 @@ query_fitness_data(metric="duration", range="4w", aggregation="sum", activity_ty
 ```
 Result is in seconds -- divide by 3600 for hours.
 
+### Register a new pair of shoes
+```
+add_shoe(shoe_name="Brooks Ghost 15", first_use_date="2025-03-01", max_distance_meters=643738)
+```
+`max_distance_meters` defaults to ~400 miles (643,738m). Adjust as needed.
+
+### Check mileage on shoes (and whether to replace)
+```
+query_shoe_distance(shoe_name="Brooks Ghost 15")
+```
+Returns total distance since first use. Compare `result` against `max_distance_meters` (if set). A shoe is due for replacement when accumulated distance exceeds the maximum.
+
+### Check shoe mileage for running only
+```
+query_shoe_distance(shoe_name="Brooks Ghost 15", activity_type=["running"])
+```
+
 ## Sync Guidance
 
 `sync_garmin()` without dates:
@@ -207,3 +236,4 @@ sync_garmin(start_date="2026-04-01", end_date="2026-04-13")
 - **Do NOT call `sync_garmin` with no date range for large gaps** — if the user asks to sync "all of March", specify `start_date` and `end_date` explicitly rather than relying on the auto-default which starts from the latest data.
 - **Do NOT assume the DB has recent data** — if the user asks about yesterday's steps and the answer looks stale, suggest running `sync_garmin()`.
 - **Do NOT use aggregation `mean` on metrics that are already daily totals** (like `total_steps`) and then compare across different range sizes without accounting for the difference. A 4-week `sum` and 1-week `sum` need the same time base for comparison.
+- **Do NOT use `query_fitness_data` with `total_distance_meters` for shoe mileage** — use `query_shoe_distance` instead. It knows the shoe's first-use date and enriches the result with shoe metadata. Manually constructing the date range loses context and the replacement threshold.

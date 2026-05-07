@@ -10,30 +10,29 @@ State is persisted to sync_state.json so crashes can be resumed.
 
 from __future__ import annotations
 
-import os
-import re
-import json
-import time
-import logging
 import argparse
+import json
+import logging
+import os
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
 from garminconnect import GarminConnectConnectionError
-from garmin_to_influxdb import connect_to_garmin, sync_range
 from influxdb import InfluxDBClient
 
-# Load .env from project root if present
-_env_path = Path(__file__).parent / ".env"
-if _env_path.exists():
-    for line in _env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if match := re.match(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$', line):
-            key, val = match.group(1), match.group(2).strip()
-            if key not in os.environ:
-                os.environ[key] = val.strip('"').strip("'")
+from garmin_to_influxdb import (
+    BATCH_DELAY_SECONDS,
+    DEFAULT_SYNC_DELAY_SECONDS,
+    MAX_RETRIES,
+    RETRY_DELAY_SECONDS,
+    connect_to_garmin,
+    load_dotenv,
+    sync_range,
+)
+
+# Load .env via shared helper
+load_dotenv()
 
 logger = logging.getLogger("sync_historical")
 
@@ -71,14 +70,21 @@ def _chunk_key(chunk_start: date) -> str:
 
 
 def _run_chunk(
-    garmin_client, influxdb_client, chunk_start: date, chunk_end: date, delay_seconds: float, activities_only: bool = False
+    garmin_client,
+    influxdb_client,
+    chunk_start: date,
+    chunk_end: date,
+    delay_seconds: float,
+    activities_only: bool = False,
 ) -> dict:
     """Sync one chunk with connection-error retry. Returns result dict."""
-    for attempt in range(2):
+    for attempt in range(MAX_RETRIES):
         try:
             return sync_range(
-                garmin_client, influxdb_client,
-                chunk_start, chunk_end,
+                garmin_client,
+                influxdb_client,
+                chunk_start,
+                chunk_end,
                 delay_seconds=delay_seconds,
                 activities_only=activities_only,
             )
@@ -89,11 +95,23 @@ def _run_chunk(
                     chunk_start,
                     exc,
                 )
-                time.sleep(60)
+                time.sleep(RETRY_DELAY_SECONDS)
             else:
-                return {"days_synced": 0, "days_failed": 1, "activities_written": 0, "activities_returned": 0, "errors": [str(exc)]}
+                return {
+                    "days_synced": 0,
+                    "days_failed": 1,
+                    "activities_written": 0,
+                    "activities_returned": 0,
+                    "errors": [str(exc)],
+                }
         except Exception as exc:
-            return {"days_synced": 0, "days_failed": 1, "activities_written": 0, "activities_returned": 0, "errors": [str(exc)]}
+            return {
+                "days_synced": 0,
+                "days_failed": 1,
+                "activities_written": 0,
+                "activities_returned": 0,
+                "errors": [str(exc)],
+            }
 
 
 def run(args: argparse.Namespace) -> None:
@@ -165,7 +183,14 @@ def run(args: argparse.Namespace) -> None:
             days_in_chunk,
         )
 
-        result = _run_chunk(garmin_client, influxdb_client, chunk_start, chunk_end, delay_seconds, activities_only=args.activities_only)
+        result = _run_chunk(
+            garmin_client,
+            influxdb_client,
+            chunk_start,
+            chunk_end,
+            delay_seconds,
+            activities_only=args.activities_only,
+        )
 
         if result["days_failed"] > 0:
             logger.warning(
@@ -173,8 +198,15 @@ def run(args: argparse.Namespace) -> None:
                 result["days_failed"],
                 chunk_start,
             )
-            time.sleep(60)
-            result = _run_chunk(garmin_client, influxdb_client, chunk_start, chunk_end, delay_seconds, activities_only=args.activities_only)
+            time.sleep(RETRY_DELAY_SECONDS)
+            result = _run_chunk(
+                garmin_client,
+                influxdb_client,
+                chunk_start,
+                chunk_end,
+                delay_seconds,
+                activities_only=args.activities_only,
+            )
 
         if result["days_failed"] > 0:
             logger.error(
@@ -192,7 +224,7 @@ def run(args: argparse.Namespace) -> None:
                 "activities_written": result.get("activities_written", 0),
                 "errors": result["errors"],
             }
-            total_failed += result["days_synced"]
+            total_failed += result["days_failed"]
             failed_chunks += 1
         else:
             logger.info(
@@ -232,7 +264,9 @@ def run(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Historical Garmin -> InfluxDB sync orchestrator")
+    parser = argparse.ArgumentParser(
+        description="Historical Garmin -> InfluxDB sync orchestrator"
+    )
     parser.add_argument(
         "--start",
         help="Override start date (YYYY-MM-DD). Default: 2019-04-11 or last saved state",
@@ -244,13 +278,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--delay",
         type=float,
-        default=4.0,
+        default=DEFAULT_SYNC_DELAY_SECONDS,
         help="Seconds to wait between each day during sync. Default: 4",
     )
     parser.add_argument(
         "--batch-delay",
         type=int,
-        default=300,
+        default=BATCH_DELAY_SECONDS,
         help="Seconds to wait between chunks. Default: 300",
     )
     parser.add_argument(
@@ -267,6 +301,6 @@ if __name__ == "__main__":
         "--activities-only",
         action="store_true",
         help="Only re-fetch and write activity data, skipping daily stats/sleep/HR. "
-             "Useful for re-syncing activities after a failed or empty chunk.",
+        "Useful for re-syncing activities after a failed or empty chunk.",
     )
     run(parser.parse_args())

@@ -1,8 +1,10 @@
-from typing import Any
 import os
 from datetime import date, timedelta
+from typing import Any
+
 from influx_client import InfluxClient
-from garmin_to_influxdb import sync_range
+
+from garmin_to_influxdb import DEFAULT_SYNC_DELAY_SECONDS, sync_range
 
 _db: InfluxClient | None = None
 
@@ -16,7 +18,10 @@ def _db_client() -> InfluxClient:
 
 def list_metrics() -> list[dict[str, Any]]:
     measurements = _db_client().get_measurements()
-    return [{"name": m, "description": f"Garmin measurement: {m}"} for m in sorted(measurements)]
+    return [
+        {"name": m, "description": f"Garmin measurement: {m}"}
+        for m in sorted(measurements)
+    ]
 
 
 def query_fitness_data(
@@ -54,7 +59,83 @@ def delete_data(measurement: str, range: str) -> dict[str, Any]:
     return {"status": "ok", "detail": result}
 
 
-def sync_garmin(start_date: str | None = None, end_date: str | None = None, delay_seconds: float = 4.0) -> dict[str, Any]:
+# ── shoe / gear tracking ──────────────────────────────────────────────
+
+
+def add_shoe(
+    shoe_name: str,
+    first_use_date: str,
+    brand: str = "",
+    model: str = "",
+    max_distance_meters: float | None = None,
+) -> dict[str, Any]:
+    """Register a shoe with its first-use date. Dates in YYYY-MM-DD format."""
+    import uuid as _uuid
+
+    shoe_uuid = str(_uuid.uuid4())[:8]
+    _db_client().write_shoe_metadata(
+        shoe_uuid=shoe_uuid,
+        shoe_name=shoe_name,
+        first_use_date=first_use_date,
+        brand=brand,
+        model=model,
+        max_distance_meters=max_distance_meters,
+    )
+    return {
+        "status": "ok",
+        "shoe_uuid": shoe_uuid,
+        "shoe_name": shoe_name,
+        "first_use_date": first_use_date,
+    }
+
+
+def list_shoes() -> list[dict[str, Any]]:
+    """Return all registered shoes with their first-use dates."""
+    return _db_client().get_shoe_metadata()
+
+
+def query_shoe_distance(
+    shoe_name: str,
+    activity_type: list[str] | None = None,
+) -> dict[str, Any]:
+    """Calculate total distance accumulated on a shoe since its first use.
+
+    Looks up the shoe's stored first-use date, then queries the sum of
+    total_distance_meters from that date through today.
+    """
+    shoes = _db_client().get_shoe_metadata(name_filter=shoe_name)
+    if not shoes:
+        return {"status": "error", "detail": f"No shoe found with name '{shoe_name}'"}
+
+    shoe = shoes[0]
+    first_use = shoe.get("first_use_date", "")
+    if not first_use:
+        return {
+            "status": "error",
+            "detail": f"Shoe '{shoe_name}' has no first-use date stored",
+        }
+
+    today = date.today().isoformat()
+    time_range = f"{first_use}..{today}"
+
+    result = _db_client().query_scalar(
+        metric="total_distance_meters",
+        aggregation="sum",
+        time_range=time_range,
+        activity_type=activity_type,
+    )
+    result["shoe_name"] = shoe_name
+    result["first_use_date"] = first_use
+    result["shoe_uuid"] = shoe.get("shoe_uuid", "")
+    result["max_distance_meters"] = shoe.get("max_distance_meters")
+    return result
+
+
+def sync_garmin(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    delay_seconds: float = DEFAULT_SYNC_DELAY_SECONDS,
+) -> dict[str, Any]:
     from garmin_to_influxdb import connect_to_garmin
 
     latest = _db_client().get_latest_timestamp()
@@ -76,4 +157,6 @@ def sync_garmin(start_date: str | None = None, end_date: str | None = None, dela
     )
     if client is None:
         return {"status": "error", "detail": "Garmin login failed"}
-    return sync_range(client, _db_client()._client, start, end, delay_seconds=delay_seconds)
+    return sync_range(
+        client, _db_client()._client, start, end, delay_seconds=delay_seconds
+    )

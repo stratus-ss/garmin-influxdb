@@ -3,21 +3,21 @@
 # This script is intended to download data from Garmin and then insert it into an InfluxDB
 
 
+import argparse
+import logging
+import os
+import time
+from datetime import date, timedelta
+
+import requests
 from garminconnect import (
     Garmin,
+    GarminConnectAuthenticationError,
     GarminConnectConnectionError,
     GarminConnectTooManyRequestsError,
-    GarminConnectAuthenticationError,
 )
-
-from datetime import date, timedelta
-import time
-from influxdb import InfluxDBClient
 from garth.exc import GarthHTTPError
-import os
-import requests
-import logging
-import argparse
+from influxdb import InfluxDBClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +41,50 @@ influx_username = os.getenv("INFLUX_USER", "")
 influx_password = os.getenv("INFLUX_PASS", "")
 influx_db = os.getenv("INFLUX_DB", "garmin")
 influxdb_time_format = "%Y-%m-%dT%H:%M:%SZ"
+
+# Time-zone offset constants (seconds) — Garmin timestamps are in local time, InfluxDB uses UTC
+ACTIVITY_TZ_OFFSET_SECONDS = 14400  # 4-hour offset for activity timestamps
+DAILY_STATS_TZ_OFFSET_SECONDS = 20000  # 5.56-hour offset for daily stats timestamps
+
+# Timing constants
+RETRY_DELAY_SECONDS = 60  # seconds to wait before retrying a failed chunk
+DEFAULT_SYNC_DELAY_SECONDS = 4.0  # default delay between days during sync
+BATCH_DELAY_SECONDS = 300  # seconds to wait between chunks in historical sync
+MAX_RETRIES = 2  # max attempts per chunk (used as range(MAX_RETRIES))
+
+
+def load_dotenv() -> None:
+    """Load .env from the project root into os.environ if not already set."""
+    from pathlib import Path
+
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        import re
+
+        if match := re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line):
+            key, val = match.group(1), match.group(2).strip()
+            if key not in os.environ:
+                os.environ[key] = val.strip('"').strip("'")
+
+
+# Load .env at module level so scripts don't need to pre-load it
+load_dotenv()
+
+
+def to_influx_timestamp(date_str: str, fmt: str, tz_offset_seconds: int = 0) -> str:
+    """Parse date_str with fmt, add tz_offset_seconds, return InfluxDB time format string."""
+    ts = time.mktime(time.strptime(date_str, fmt)) + tz_offset_seconds
+    return time.strftime(influxdb_time_format, time.localtime(round(ts)))
+
+
+def to_influx_datestamp(date_str: str, fmt: str = "%Y-%m-%d") -> str:
+    """Parse date_str (default YYYY-MM-DD) with no offset, return InfluxDB time format string."""
+    return to_influx_timestamp(date_str, fmt, tz_offset_seconds=0)
 
 
 def get_data_from_garmin(component, method_name, args=None, client=None):
@@ -78,26 +122,6 @@ def connect_to_garmin(username, password):
     :return: client object
     """
 
-    # print("Garmin(email, password)")
-    # print("----------------------------------------------------------------------------------------")
-    # try:
-    #     client = Garmin(username, password)
-    # except (
-    #         GarminConnectConnectionError,
-    #         GarminConnectAuthenticationError,
-    #         GarminConnectTooManyRequestsError,
-    # ) as err:
-    #     print("Error occurred during Garmin Connect Client get initial client: %s" % err)
-    #     quit()
-    # except Exception:
-    #     print("Unknown error occurred during Garmin Connect Client get initial client")
-    #     quit()
-    # print("client.login()")
-    # print("----------------------------------------------------------------------------------------")
-    # login_command = "client.login()"
-    # get_data_from_garmin("login", login_command, client=client)
-    # return client
-
     try:
         logger.info("Login to Garmin Connect using token data from '%s'...", tokenstore)
         garmin = Garmin()
@@ -105,13 +129,16 @@ def connect_to_garmin(username, password):
     except (FileNotFoundError, GarthHTTPError, GarminConnectAuthenticationError):
         logger.info(
             "Tokens not found -- login with credentials to generate them. "
-            "They will be saved to '%s'.", tokenstore
+            "They will be saved to '%s'.",
+            tokenstore,
         )
         try:
             garmin = Garmin(garmin_username, garmin_password)
             garmin.login()
             # garminconnect ≥0.3.x renamed self.garth → self.client
-            _garth_obj = getattr(garmin, "client", None) or getattr(garmin, "garth", None)
+            _garth_obj = getattr(garmin, "client", None) or getattr(
+                garmin, "garth", None
+            )
             if _garth_obj:
                 _garth_obj.dump(tokenstore)
 
@@ -126,40 +153,6 @@ def connect_to_garmin(username, password):
             return None
 
     return garmin
-
-
-def download_all_activity(client, activities):
-    for activity in activities:
-        activity_id = activity["activityId"]
-        logger.info("Downloading activity %s", activity_id)
-
-        gpx_data = client.download_activity(
-            activity_id, dl_fmt=client.ActivityDownloadFormat.GPX
-        )
-        output_file = f"./{str(activity_id)}.gpx"
-        with open(output_file, "wb") as fb:
-            fb.write(gpx_data)
-
-        tcx_data = client.download_activity(
-            activity_id, dl_fmt=client.ActivityDownloadFormat.TCX
-        )
-        output_file = f"./{str(activity_id)}.tcx"
-        with open(output_file, "wb") as fb:
-            fb.write(tcx_data)
-
-        zip_data = client.download_activity(
-            activity_id, dl_fmt=client.ActivityDownloadFormat.ORIGINAL
-        )
-        output_file = f"./{str(activity_id)}.zip"
-        with open(output_file, "wb") as fb:
-            fb.write(zip_data)
-
-        csv_data = client.download_activity(
-            activity_id, dl_fmt=client.ActivityDownloadFormat.CSV
-        )
-        output_file = f"./{str(activity_id)}.csv"
-        with open(output_file, "wb") as fb:
-            fb.write(csv_data)
 
 
 def create_json_body(measurement, measurement_value, datestamp, tags=None):
@@ -213,12 +206,11 @@ def create_influxdb_multi_measurement(
     for entry in user_data:
         activity_start = entry[start_time_heading]
         if timestamp_offset:
-            timestamp = time.mktime(time.strptime(activity_start, date_format)) + 14400
+            current_date = to_influx_timestamp(
+                activity_start, date_format, ACTIVITY_TZ_OFFSET_SECONDS
+            )
         else:
-            timestamp = time.mktime(time.strptime(activity_start, date_format))
-        current_date = time.strftime(
-            influxdb_time_format, time.localtime(round(timestamp))
-        )
+            current_date = to_influx_datestamp(activity_start, date_format)
         tags = entry_tags_fn(entry) if entry_tags_fn else None
         for heading in subset_list_of_stats:
             value = entry.get(heading)
@@ -273,9 +265,8 @@ def sync_activities(client, influxdb_client, start_date, end_date):
             start_local = entry.get("startTimeLocal")
             if not start_local:
                 continue
-            ts = time.mktime(time.strptime(start_local, "%Y-%m-%d %H:%M:%S")) + 14400
-            datestamp = time.strftime(
-                influxdb_time_format, time.localtime(round(ts))
+            datestamp = to_influx_timestamp(
+                start_local, "%Y-%m-%d %H:%M:%S", ACTIVITY_TZ_OFFSET_SECONDS
             )
             tags = _activity_tags(entry)
             for heading in activity_list:
@@ -308,45 +299,45 @@ def sync_activities(client, influxdb_client, start_date, end_date):
 def sync_day(client, influxdb_client, day_str, gather_hrv_data=False):
     """Sync all data for a single day. Returns None on success, error string on failure."""
     try:
-        step_data = get_data_from_garmin("step_data", "get_steps_data", args=(day_str,), client=client)
-        hrv_data = get_data_from_garmin("hrv_data", "get_hrv_data", args=(day_str,), client=client)
-        stats = get_data_from_garmin("stats", "get_stats", args=(day_str,), client=client)
-        sleep_data = get_data_from_garmin("sleep_data", "get_sleep_data", args=(day_str,), client=client)
-        sleep_data_date = time.mktime(
-            time.strptime(sleep_data["dailySleepDTO"]["calendarDate"], garmin_date_format)
+        step_data = get_data_from_garmin(
+            "step_data", "get_steps_data", args=(day_str,), client=client
         )
-        daily_stats_date = (
-            time.mktime(time.strptime(stats["calendarDate"], garmin_date_format)) + 20000
+        hrv_data = get_data_from_garmin(
+            "hrv_data", "get_hrv_data", args=(day_str,), client=client
+        )
+        stats = get_data_from_garmin(
+            "stats", "get_stats", args=(day_str,), client=client
+        )
+        sleep_data = get_data_from_garmin(
+            "sleep_data", "get_sleep_data", args=(day_str,), client=client
+        )
+        sleep_datestamp = to_influx_datestamp(
+            sleep_data["dailySleepDTO"]["calendarDate"]
+        )
+        daily_stats_datestamp = to_influx_timestamp(
+            stats["calendarDate"], garmin_date_format, DAILY_STATS_TZ_OFFSET_SECONDS
         )
         floor_data = {
             "floors_ascended": stats["floorsAscended"],
             "floors_descended": stats["floorsDescended"],
-            "current_date": time.strftime(
-                influxdb_time_format, time.localtime(daily_stats_date)
-            ),
+            "current_date": daily_stats_datestamp,
         }
         useful_daily_sleep_data = {
             "awake_minutes": sleep_data["dailySleepDTO"]["awakeSleepSeconds"],
             "light_sleep_minutes": sleep_data["dailySleepDTO"]["lightSleepSeconds"],
             "deep_sleep_minutes": sleep_data["dailySleepDTO"]["deepSleepSeconds"],
             "total_sleep_minutes": sleep_data["dailySleepDTO"]["sleepTimeSeconds"],
-            "current_date": time.strftime(
-                influxdb_time_format, time.localtime(sleep_data_date)
-            ),
+            "current_date": sleep_datestamp,
         }
         heart_rate = {
             "lowest_heart_rate": stats["minHeartRate"],
             "highest_heart_rate": stats["maxHeartRate"],
             "resting_heart_rate": stats["restingHeartRate"],
-            "current_date": time.strftime(
-                influxdb_time_format, time.localtime(daily_stats_date)
-            ),
+            "current_date": daily_stats_datestamp,
         }
         daily_stats = {
             "total_burned_calories": stats["totalKilocalories"],
-            "current_date": time.strftime(
-                influxdb_time_format, time.localtime(daily_stats_date)
-            ),
+            "current_date": daily_stats_datestamp,
             "total_steps": stats["totalSteps"],
             "total_distance_meters": stats["totalDistanceMeters"],
             "daily_step_goal": stats["dailyStepGoal"],
@@ -364,9 +355,7 @@ def sync_day(client, influxdb_client, day_str, gather_hrv_data=False):
                 hrv_daily_summary = {
                     "hrv_last_night_avg": hrv_data["hrvSummary"]["lastNightAvg"],
                     "hrv_weekly_avg": hrv_data["hrvSummary"]["weeklyAvg"],
-                    "current_date": time.strftime(
-                        influxdb_time_format, time.localtime(daily_stats_date)
-                    ),
+                    "current_date": daily_stats_datestamp,
                 }
                 create_influxdb_daily_measurement(hrv_daily_summary, influxdb_client)
             except Exception:
@@ -385,7 +374,15 @@ def sync_day(client, influxdb_client, day_str, gather_hrv_data=False):
         return str(exc)
 
 
-def sync_range(client, influxdb_client, start_date, end_date, delay_seconds=4.0, gather_hrv_data=False, activities_only=False):
+def sync_range(
+    client,
+    influxdb_client,
+    start_date,
+    end_date,
+    delay_seconds=DEFAULT_SYNC_DELAY_SECONDS,
+    gather_hrv_data=False,
+    activities_only=False,
+):
     """
     Sync all data for a date range (activities + per-day stats).
     Returns dict with days_synced, days_failed, activities_written, activities_returned, errors.
@@ -397,7 +394,9 @@ def sync_range(client, influxdb_client, start_date, end_date, delay_seconds=4.0,
     activities_returned = 0
 
     # Activities (one shot for the whole range)
-    act_result = sync_activities(client, influxdb_client, str(start_date), str(end_date))
+    act_result = sync_activities(
+        client, influxdb_client, str(start_date), str(end_date)
+    )
     activities_written = act_result.get("activities_written", 0)
     activities_returned = act_result.get("activities_returned", 0)
     if act_result["days_failed"] > 0:
@@ -430,7 +429,13 @@ def sync_range(client, influxdb_client, start_date, end_date, delay_seconds=4.0,
 
     failed = len(errors)
     synced = (time_delta.days + 1) - failed
-    return {"days_synced": synced, "days_failed": failed, "activities_written": activities_written, "activities_returned": activities_returned, "errors": errors}
+    return {
+        "days_synced": synced,
+        "days_failed": failed,
+        "activities_written": activities_written,
+        "activities_returned": activities_returned,
+        "errors": errors,
+    }
 
 
 if __name__ == "__main__":

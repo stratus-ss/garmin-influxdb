@@ -1,8 +1,9 @@
-from influxdb import InfluxDBClient
-from typing import Any, Optional
-from datetime import date
 import os
 import re
+from datetime import date
+from typing import Any, Optional
+
+from influxdb import InfluxDBClient
 
 _ISO8601_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(Z?))?$")
 _RELATIVE_RE = re.compile(r"^\d+[smhdw]$")
@@ -38,33 +39,46 @@ _METRIC_UNITS = {
     "hrv_weekly_avg": "ms",
 }
 
+
+_DISPLAY_FORMATTERS = {
+    "total_distance_meters": lambda raw: (
+        f"{raw:,.0f} meters ({raw / 1609.34:.1f} miles)"
+    ),
+    "distance": lambda raw: f"{raw:,.0f} meters ({raw / 1609.34:.1f} miles)",
+    "total_steps": lambda raw: f"{raw:,.0f} steps",
+    "total_burned_calories": lambda raw: f"{raw:,.0f} kcal",
+    "highly_active_minutes": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+    "moderately_active_minutes": lambda raw: (
+        f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)"
+    ),
+    "sedentary_minutes": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+    "awake_minutes": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+    "light_sleep_minutes": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+    "deep_sleep_minutes": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+    "total_sleep_minutes": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+    "averageSpeed": lambda raw: f"{raw:.2f} km/h ({raw * 0.621371:.1f} mph)",
+    "maxSpeed": lambda raw: f"{raw:.2f} km/h ({raw * 0.621371:.1f} mph)",
+    "avgStrideLength": lambda raw: f"{raw:.1f} cm ({raw / 100:.2f} m)",
+    "averageRunningCadenceInStepsPerMinute": lambda raw: f"{raw:.0f} spm",
+    "averageHR": lambda raw: f"{raw:.0f} bpm",
+    "maxHR": lambda raw: f"{raw:.0f} bpm",
+    "lowest_heart_rate": lambda raw: f"{raw:.0f} bpm",
+    "highest_heart_rate": lambda raw: f"{raw:.0f} bpm",
+    "resting_heart_rate": lambda raw: f"{raw:.0f} bpm",
+    "floors_ascended": lambda raw: f"{raw:.0f} floors",
+    "floors_descended": lambda raw: f"{raw:.0f} floors",
+    "duration": lambda raw: f"{raw:,.0f} seconds ({raw / 3600:.1f} hours)",
+}
+
+
 # Conversions to human-readable units
 def _display(metric: str, raw: float) -> str:
-    if metric in ("total_distance_meters", "distance") and raw is not None:
-        miles = raw / 1609.34
-        return f"{raw:,.0f} meters ({miles:.1f} miles)"
-    if metric == "total_steps" and raw is not None:
-        return f"{raw:,.0f} steps"
-    if metric == "total_burned_calories" and raw is not None:
-        return f"{raw:,.0f} kcal"
-    if metric in ("highly_active_minutes", "moderately_active_minutes", "sedentary_minutes", "awake_minutes", "light_sleep_minutes", "deep_sleep_minutes", "total_sleep_minutes") and raw is not None:
-        hours = raw / 3600
-        return f"{raw:,.0f} seconds ({hours:.1f} hours)"
-    if metric in ("averageSpeed", "maxSpeed") and raw is not None:
-        mph = raw * 0.621371
-        return f"{raw:.2f} km/h ({mph:.1f} mph)"
-    if metric == "avgStrideLength" and raw is not None:
-        return f"{raw:.1f} cm ({raw/100:.2f} m)"
-    if metric == "averageRunningCadenceInStepsPerMinute" and raw is not None:
-        return f"{raw:.0f} spm"
-    if metric in ("averageHR", "maxHR", "lowest_heart_rate", "highest_heart_rate", "resting_heart_rate") and raw is not None:
-        return f"{raw:.0f} bpm"
-    if metric in ("floors_ascended", "floors_descended") and raw is not None:
-        return f"{raw:.0f} floors"
-    if metric == "duration" and raw is not None:
-        return f"{raw:,.0f} seconds ({raw/3600:.1f} hours)"
+    """Format a metric value for human-readable display."""
     if raw is None:
         return "N/A"
+    formatter = _DISPLAY_FORMATTERS.get(metric)
+    if formatter:
+        return formatter(raw)
     return f"{raw}"
 
 
@@ -81,6 +95,87 @@ class InfluxClient:
     def get_measurements(self) -> list[str]:
         result = self._client.query("SHOW MEASUREMENTS")
         return [m["name"] for m in result.get_points()]
+
+    # ── shoe / gear metadata ──────────────────────────────────────────────
+
+    def write_shoe_metadata(
+        self,
+        shoe_uuid: str,
+        shoe_name: str,
+        first_use_date: str,
+        brand: str = "",
+        model: str = "",
+        retired: bool = False,
+        max_distance_meters: Optional[float] = None,
+    ) -> None:
+        """Store shoe metadata as a point in the 'gear_metadata' measurement.
+
+        The point timestamp is set to the first-use date so that the
+        measurement naturally aligns with time-based queries.
+        """
+        fields: dict[str, Any] = {
+            "shoe_name": shoe_name,
+            "first_use_date": first_use_date,
+        }
+        if brand:
+            fields["brand"] = brand
+        if model:
+            fields["model"] = model
+        if retired:
+            fields["retired"] = "true"
+        if max_distance_meters is not None:
+            fields["max_distance_meters"] = max_distance_meters
+
+        tags = {"shoe_uuid": shoe_uuid}
+
+        body = [
+            {
+                "measurement": "gear_metadata",
+                "tags": tags,
+                "time": f"{first_use_date}T00:00:00Z",
+                "fields": fields,
+            }
+        ]
+        self._client.write_points(body)
+
+    def get_shoe_metadata(
+        self, name_filter: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Return all stored shoe metadata, optionally filtered by shoe name."""
+        where = ""
+        if name_filter:
+            where = f" WHERE \"shoe_name\" = '{name_filter}'"
+        ql = f"SELECT last(shoe_name), last(first_use_date), last(brand), last(model), last(retired), last(max_distance_meters) FROM gear_metadata{where} GROUP BY shoe_uuid"
+        results = self._client.query(ql)
+        shoes = []
+        for (_, tags), points in results.items():
+            point_list = list(points)
+            if not point_list:
+                continue
+            p = point_list[-1]
+            shoes.append(
+                {
+                    "shoe_uuid": tags.get("shoe_uuid", "") if tags else "",
+                    "shoe_name": p.get("last", ""),
+                    "first_use_date": p.get("last_1", ""),
+                    "brand": p.get("last_2", "") or "",
+                    "model": p.get("last_3", "") or "",
+                    "retired": p.get("last_4", "") == "true",
+                    "max_distance_meters": p.get("last_5"),
+                }
+            )
+        return shoes
+
+    def get_latest_shoe_sync(self) -> date | None:
+        """Return the most recent first_use_date stored in gear_metadata, or None."""
+        ql = "SELECT last(first_use_date) FROM gear_metadata"
+        points = list(self._client.query(ql).get_points())
+        if not points or not points[0].get("time"):
+            return None
+        ts = points[0].get("time", "")
+        if not ts:
+            return None
+        return date.fromisoformat(ts.replace("Z", "+00:00")[:10])
 
     def _build_time_clause(self, time_range: str) -> str:
         if ".." in time_range:
@@ -131,21 +226,45 @@ class InfluxClient:
         group_by: Optional[str] = None,
         activity_type: Optional[list[str]] = None,
     ) -> dict:
-        time_clause = self._build_time_clause(time_range) + self._build_type_clause(activity_type)
+        time_clause = self._build_time_clause(time_range) + self._build_type_clause(
+            activity_type
+        )
         if group_by:
-            ql = f"SELECT {aggregation}(value) AS result FROM \"{metric}\" WHERE {time_clause} GROUP BY time({group_by})"
+            ql = f'SELECT {aggregation}(value) AS result FROM "{metric}" WHERE {time_clause} GROUP BY time({group_by})'
             points = list(self._client.query(ql).get_points())
-            values = [float(p["result"]) for p in points if isinstance(p.get("result"), (int, float))]
+            values = [
+                float(p["result"])
+                for p in points
+                if isinstance(p.get("result"), (int, float))
+            ]
         else:
-            ql = f"SELECT {aggregation}(value) AS result FROM \"{metric}\" WHERE {time_clause}"
+            ql = f'SELECT {aggregation}(value) AS result FROM "{metric}" WHERE {time_clause}'
             points = list(self._client.query(ql).get_points())
-            values = [float(p["result"]) for p in points if isinstance(p.get("result"), (int, float))]
+            values = [
+                float(p["result"])
+                for p in points
+                if isinstance(p.get("result"), (int, float))
+            ]
 
         if not values:
-            return {"metric": metric, "aggregation": aggregation, "range": time_range, "result": None, "unit_hint": _METRIC_UNITS.get(metric, "unknown")}
+            return {
+                "metric": metric,
+                "aggregation": aggregation,
+                "range": time_range,
+                "result": None,
+                "unit_hint": _METRIC_UNITS.get(metric, "unknown"),
+            }
 
         if group_by:
-            result = [{"timestamp": p["time"], "value": float(p["result"]), "display": _display(metric, float(p["result"]))} for p in points if p.get("result") is not None]
+            result = [
+                {
+                    "timestamp": p["time"],
+                    "value": float(p["result"]),
+                    "display": _display(metric, float(p["result"])),
+                }
+                for p in points
+                if p.get("result") is not None
+            ]
         else:
             scalar = values[0] if len(values) == 1 else values
             result = scalar
@@ -154,7 +273,9 @@ class InfluxClient:
             display_val = float(result)
         elif isinstance(result, list) and result:
             first = result[0]
-            display_val = first.get("value") if isinstance(first, dict) else float(first)
+            display_val = (
+                first.get("value") if isinstance(first, dict) else float(first)
+            )
         else:
             display_val = None
 
@@ -175,9 +296,19 @@ class InfluxClient:
         activity_type: Optional[list[str]] = None,
     ) -> list[dict]:
         if not fields:
-            fields = ["distance", "duration", "averageSpeed", "maxSpeed", "averageHR", "maxHR", "steps"]
+            fields = [
+                "distance",
+                "duration",
+                "averageSpeed",
+                "maxSpeed",
+                "averageHR",
+                "maxHR",
+                "steps",
+            ]
 
-        where = self._build_time_clause(time_range) + self._build_type_clause(activity_type)
+        where = self._build_time_clause(time_range) + self._build_type_clause(
+            activity_type
+        )
         rows_by_time: dict[str, dict[str, Any]] = {}
 
         for field in fields:
@@ -194,5 +325,7 @@ class InfluxClient:
                         rows_by_time[key] = {"time": ts, "activityType": act_type}
                     rows_by_time[key][field] = p.get("value")
 
-        sorted_rows = sorted(rows_by_time.values(), key=lambda r: r["time"], reverse=True)
+        sorted_rows = sorted(
+            rows_by_time.values(), key=lambda r: r["time"], reverse=True
+        )
         return sorted_rows[:limit]
