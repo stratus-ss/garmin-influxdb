@@ -26,11 +26,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 start_date = date(2026, 4, 6)
-end_date = date(2026, 4, 13)
+end_date = date(2026, 7, 19)
 tokenstore = ".garminconnect"
 speed_multiplier = 3.584392177
 # The speed multiplier was found by taking the "averageSpeed" float from an activity and comparing
 # to the speed reporting in the app. For example a speed of 1.61199998 * multiplyer = 5.77804 km/hr
+
+# Load .env BEFORE any os.getenv reads (includes Garmin + InfluxDB vars)
+from pathlib import Path
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#"):
+            continue
+        import re as _re
+        if _m := _re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", _line):
+            _k, _v = _m.group(1), _m.group(2).strip()
+            if _k not in os.environ:
+                os.environ[_k] = _v.strip('"').strip("'")
+
 garmin_username = os.getenv("GARMIN_USER", "")
 garmin_password = os.getenv("GARMIN_PASS", "")
 
@@ -178,6 +193,8 @@ def create_influxdb_daily_measurement(user_data, influxdb_client):
             continue
         if "minutes" in heading.lower():
             value = value / 60
+        if isinstance(value, float):
+            value = int(value)
         logger.info("  %s: %s", heading, value)
         json_body = create_json_body(heading, value, user_data["current_date"])
         influxdb_client.write_points(json_body)
