@@ -3,7 +3,7 @@
 Syncs Garmin Connect workout data and daily health metrics to InfluxDB for time-series analysis. Supports both one-shot and historical backfill sync modes, plus an optional MCP server for programmatic access.
 
 ![License](https://img.shields.io/github/license/stratus-ss/garmin-influxdb)
-![Python](https://img.shields.io/github/pipenv/l/python-version/stratus-ss/garmin-influxdb?label=python%203.10%2B)
+![Python](https://img.shields.io/github/pipenv/l/python-version/stratus-ss/garmin-influxdb?label=python%203.12%2B)
 ![InfluxDB](https://img.shields.io/badge/InfluxDB-1.x-blue)
 
 
@@ -33,7 +33,7 @@ On first run, tokens are cached in `.garminconnect/` for re-use on subsequent ru
 - **Speed calibration:** applies verified multiplier (3.584392177) to convert Garmin m/s to km/h
 - **Activity tagging:** `activityType` tag on all activity records for sport-based filtering
 - **Timezone correction:** +20000s offset applied to daily stat timestamps
-- **MCP server:** optional FastMCP server for AI agent tool access to InfluxDB queries and sync
+- **MCP server:** optional MCP server (mcp 2.x `MCPServer`) for AI agent tool access to InfluxDB queries and sync
 - **Shoe tracking:** register shoes with first-use dates, query cumulative distance to determine replacement timing
 
 ## Documentation

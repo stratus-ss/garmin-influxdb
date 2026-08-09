@@ -8,10 +8,11 @@
 
 Syncs Garmin Connect workout data to InfluxDB for time-series analysis. Supports both live ingestion and historical backfill via CLI scripts, plus an MCP server for programmatic access.
 
-- **Language:** Python 3.10+
+- **Language:** Python 3.12+ (garminconnect 0.3.x requires Python 3.12+)
 - **Framework:** MCP (Model Context Protocol) for server; stdlib argparse for scripts
 - **Package manager:** pip + requirements.txt (no pyproject.toml)
-- **Key dependencies:** garminconnect, influxdb, mcp
+- **Key dependencies:** garminconnect, influxdb, mcp, garth, python-dotenv
+- **Container image:** `quay.io/sovens/mcps/garmin-influxdb:0.6.1` (mcp 2.x `MCPServer`)
 
 ## Commands
 
@@ -78,6 +79,7 @@ garmin-influxdb/
 - Do not change the speed multiplier 3.584392177 without Garmin app verification
 - Do not add pyproject.toml -- requirements.txt is the established pattern
 - Do not add new test frameworks -- there is no pytest suite
+- Do not widen a dependency major bound without a migration plan (see `zed_plans/garmin_influx_dependency_upgrade_2026-08-09.md` for the pattern)
 
 ## Testing
 

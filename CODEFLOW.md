@@ -193,7 +193,7 @@ flowchart TB
     end
 
     subgraph mcp_server_server["mcp_server/server.py"]
-        C1["FastMCP app<br/>5 tool decorators: list_metrics, query_fitness_data, query_activities, delete_data, sync_garmin"]
+        C1["MCPServer app (mcp 2.x)<br/>8 tool decorators: list_metrics, query_fitness_data, query_activities, delete_data, add_shoe, list_shoes, query_shoe_distance, sync_garmin"]
     end
 
     subgraph mcp_server_tools["mcp_server/tools.py"]

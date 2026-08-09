@@ -53,7 +53,7 @@ Key functions: `_week_chunks`, `_run_chunk`, `run`.
 
 ### mcp_server/server.py
 
-FastMCP app with 5 tool handlers: `list_metrics`, `query_fitness_data`, `query_activities`, `delete_data`, `sync_garmin`. All tools delegate to `mcp_server/tools.py`. The server runs over stdio so it can be embedded in AI agent tool chains.
+MCPServer app (mcp 2.x `MCPServer`) with 8 tool handlers: `list_metrics`, `query_fitness_data`, `query_activities`, `delete_data`, `add_shoe`, `list_shoes`, `query_shoe_distance`, `sync_garmin`. All tools delegate to `mcp_server/tools.py`. The server runs over stdio so it can be embedded in AI agent tool chains.
 
 ### mcp_server/tools.py
 

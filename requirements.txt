@@ -1,2 +1,4 @@
-garminconnect
-influxdb
+garminconnect>=0.3.9,<1.0
+garth>=0.8.0,<1.0
+influxdb>=5.3.2,<6.0
+python-dotenv>=1.2.2,<2.0

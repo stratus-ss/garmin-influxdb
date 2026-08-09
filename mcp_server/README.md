@@ -1,6 +1,6 @@
 # Garmin InfluxDB MCP Server
 
-MCP server for Garmin fitness data. Exposes 5 tools via FastMCP to query and sync data from InfluxDB and Garmin Connect.
+MCP server for Garmin fitness data. Exposes 8 tools via mcp 2.x `MCPServer` to query and sync data from InfluxDB and Garmin Connect.
 
 ## Moltis Configuration
 
@@ -26,7 +26,7 @@ args = [
   "-e", "INFLUX_DB=garmin",
   "-e", "GARMIN_USER=<garmin_user>",
   "-e", "GARMIN_PASS=<garmin_pass>",
-  "quay.io/sovens/mcps/garmin-influxdb:0.2"
+  "quay.io/sovens/mcps/garmin-influxdb:0.6.1"
 ]
 ```
 
@@ -44,13 +44,16 @@ args = [
 
 ## Available Tools
 
-| Tool               | Description                                                                 |
-|--------------------|-----------------------------------------------------------------------------|
-| `list_metrics`     | Discover available measurements in InfluxDB                                  |
-| `query_fitness_data` | Aggregate a metric over a time range (sum/mean/min/max/count/last)       |
-| `query_activities` | List recent activities with optional field selection and type filter        |
-| `delete_data`      | Delete data from a measurement within a time range (use with caution)       |
-| `sync_garmin`      | Sync fitness data from Garmin Connect for a date range                      |
+| Tool                  | Description                                                                 |
+|-----------------------|-----------------------------------------------------------------------------|
+| `list_metrics`        | Discover available measurements in InfluxDB                                  |
+| `query_fitness_data`  | Aggregate a metric over a time range (sum/mean/min/max/count/last)       |
+| `query_activities`    | List recent activities with optional field selection and type filter        |
+| `delete_data`         | Delete data from a measurement within a time range (use with caution)       |
+| `add_shoe`            | Register a shoe with first-use date and optional max distance                |
+| `list_shoes`          | List all registered shoes with metadata                                       |
+| `query_shoe_distance` | Calculate total distance on a shoe since first use                          |
+| `sync_garmin`         | Sync fitness data from Garmin Connect for a date range                      |
 
 ## Query Examples
 

@@ -10,9 +10,9 @@ load_dotenv()
 import json
 
 import tools
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
-MCP = FastMCP("garmin-influxdb-mcp")
+MCP = MCPServer("garmin-influxdb-mcp")
 
 
 @MCP.tool()

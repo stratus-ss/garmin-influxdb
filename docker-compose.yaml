@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: mcp_server/Dockerfile
-    image: quay.io/sovens/mcps/garmin-influxdb:0.5
+    image: quay.io/sovens/mcps/garmin-influxdb:0.6.1
     container_name: garmin-influxdb-mcp
     command: ["sleep", "infinity"]
     environment:
